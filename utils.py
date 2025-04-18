@@ -27,7 +27,7 @@ def get_logging_config() -> Logger:
 
     return logging.getLogger(__name__)
 
-def invoke_claude_3_sonnet(prompt: str, inference_profile_arn: str, logger: Logger, max_tokens: int = 100000) -> str | None:
+def invoke_claude_3_sonnet(prompt: str, inference_profile_arn: str, logger: Logger, max_tokens: int = 90000) -> str | None:
     bedrock_runtime = boto3.client('bedrock-runtime', region_name='us-east-1')
     request_body = {
         "anthropic_version": "bedrock-2023-05-31",
@@ -67,7 +67,7 @@ def invoke_claude_3_sonnet(prompt: str, inference_profile_arn: str, logger: Logg
 def get_system_prompt(task: str, dom: str) -> str:
     prompt = f"""
 #info
-Review the provided dom and perform the following task. 
+Review the provided dom and perform the following task. If the task is just a question then provide the relevant response. If possible, ask relevant question to the user to continue the chat.
 
 #task
 {task}
@@ -78,11 +78,7 @@ Review the provided dom and perform the following task.
 #Output Format
 {{
     "data": {{
-        "task_id": "194f2173-fee6-45d1-86ba-d65c4d2bfd34",
         "response": "on the left side navigation menus, above the Kubernetes menu, hover on Administrator menu and click on Infrastructure submenu. ",
-        "url": "",
-        "type": "browser-use",
-        "request": "dom",
         "actions": [
             {{
                 "selector": "html > body > app-root > vertical-layout > core-sidebar > app-menu > vertical-menu > div > div:nth-of-type(2) > ul > li > div > a",

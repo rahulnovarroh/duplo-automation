@@ -14,13 +14,11 @@ MAX_TOKENS = os.getenv("MAX_TOKENS", 100000)
 logger: Logger = get_logging_config()
 
 def init_request(task: str, dom: str, logger: Logger) -> str | None:
+    if not dom or not task: return None
     return invoke_claude_3_sonnet(get_system_prompt(task, dom), INFERENCE_PROFILE_ARN, logger)
 
 task = """
-Fill the following information in the form:
-        Name: test
-        VPC CIDR: 10.10.0.0/16
-        Click on Create. 
+how do I create an infra?
 """
 
 # Open the file in read mode
