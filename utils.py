@@ -7,7 +7,6 @@ import logging
 from dotenv import load_dotenv
 from logging.handlers import RotatingFileHandler
 from logging import Logger
-# from json_repair import repair_json
 load_dotenv()
 
 def get_logging_config() -> Logger:
@@ -48,9 +47,9 @@ def invoke_claude_3_sonnet(prompt: str, inference_profile_arn: str, logger: Logg
     }
     request_body_json = json.dumps(request_body)
     
-    max_retries = 5
+    max_retries = os.getenv("MAX_THROTTLING_RETRIES", 5)
     retry_count = 0
-    base_delay = 2  # Base delay in seconds
+    base_delay = os.getenv("BASE_THROTTLING_DELAY", 5)  # Base delay in seconds
     
     while retry_count < max_retries:
         try:
@@ -113,13 +112,3 @@ Review the provided dom and perform the following task. If the task is just a qu
 
 """
     return prompt
-
-# def format_response(response: str, logger: Logger) -> json:
-#     if response is None: return response
-#     response.replace("```", "")
-#     response = repair_json(response)
-#     try:
-#         response = json.loads(response)
-#         logger.info(response)
-#     except Exception as e:
-#         logger.error(e)
