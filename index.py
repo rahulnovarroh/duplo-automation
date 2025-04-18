@@ -2,11 +2,15 @@ import os
 from dotenv import load_dotenv
 from logging import Logger
 from utils import (
-    format_response,
+    # format_response,
     invoke_claude_3_sonnet,
     get_system_prompt,
     get_logging_config
 )
+from flask import Flask, request
+
+app = Flask(__name__)
+
 load_dotenv()
 INFERENCE_PROFILE_ARN = os.getenv("INFERENCE_PROFILE_ARN")
 MAX_TOKENS = os.getenv("MAX_TOKENS", 100000)
@@ -25,6 +29,11 @@ how do I create an infra?
 with open('input_dom.txt', 'r') as file:
     dom = file.read()
 
-response = init_request(task, dom, logger)
-logger.info("------------------------------------------------------------------------------")
-logger.info(response)
+@app.route('/agents', methods=['POST'])
+def agents():
+    task = request.form["task"]
+    dom = request.form["dom"]
+    response = init_request(task, dom, logger)
+    logger.info("------------------------------------------------------------------------------")
+    logger.info(response)
+    return response

@@ -1,11 +1,13 @@
 import os
+import time
+import random
 import boto3
 import json
 import logging
 from dotenv import load_dotenv
 from logging.handlers import RotatingFileHandler
 from logging import Logger
-from json_repair import repair_json
+# from json_repair import repair_json
 load_dotenv()
 
 def get_logging_config() -> Logger:
@@ -46,23 +48,39 @@ def invoke_claude_3_sonnet(prompt: str, inference_profile_arn: str, logger: Logg
     }
     request_body_json = json.dumps(request_body)
     
-    try:
-        response = bedrock_runtime.invoke_model(
-            modelId=inference_profile_arn,
-            body=request_body_json
-        )
+    max_retries = 5
+    retry_count = 0
+    base_delay = 2  # Base delay in seconds
+    
+    while retry_count < max_retries:
+        try:
+            response = bedrock_runtime.invoke_model(
+                modelId=inference_profile_arn,
+                body=request_body_json
+            )
 
-        response_body = json.loads(response["body"].read())
-        if "content" in response_body and len(response_body["content"]) > 0:
-            for content_item in response_body["content"]:
-                if content_item["type"] == "text":
-                    return content_item["text"]
-        
-        return None
-    except Exception as e:
-        logger.error("Error invoking Claude:")
-        logger.error(e)
-        return None
+            response_body = json.loads(response["body"].read())
+            if "content" in response_body and len(response_body["content"]) > 0:
+                for content_item in response_body["content"]:
+                    if content_item["type"] == "text":
+                        return content_item["text"]
+            
+            return None
+        except Exception as e:
+            if "ThrottlingException" in str(e):
+                retry_count += 1
+                if retry_count >= max_retries:
+                    logger.error(f"Maximum retries exceeded: {e}")
+                    return str(e)
+                
+                # Calculate delay with exponential backoff and jitter
+                delay = base_delay * (2 ** (retry_count - 1)) + random.uniform(0, 1)
+                logger.warning(f"Rate limited. Retrying in {delay:.2f} seconds... (Attempt {retry_count}/{max_retries})")
+                time.sleep(delay)
+            else:
+                logger.error("Error invoking Claude:")
+                logger.error(e)
+                return str(e)
 
 def get_system_prompt(task: str, dom: str) -> str:
     prompt = f"""
@@ -96,12 +114,12 @@ Review the provided dom and perform the following task. If the task is just a qu
 """
     return prompt
 
-def format_response(response: str, logger: Logger) -> json:
-    if response is None: return response
-    response.replace("```", "")
-    response = repair_json(response)
-    try:
-        response = json.loads(response)
-        logger.info(response)
-    except Exception as e:
-        logger.error(e)
+# def format_response(response: str, logger: Logger) -> json:
+#     if response is None: return response
+#     response.replace("```", "")
+#     response = repair_json(response)
+#     try:
+#         response = json.loads(response)
+#         logger.info(response)
+#     except Exception as e:
+#         logger.error(e)
