@@ -4,6 +4,9 @@ import random
 import boto3
 import json
 import logging
+import anthropic
+from anthropic import Anthropic
+from openai import OpenAI
 from dotenv import load_dotenv
 from logging.handlers import RotatingFileHandler
 from logging import Logger
@@ -28,7 +31,7 @@ def get_logging_config() -> Logger:
 
     return logging.getLogger(__name__)
 
-def invoke_claude_3_sonnet(prompt: str, inference_profile_arn: str, logger: Logger, max_tokens: int = 90000) -> str | None:
+def invoke_bedrock_model(prompt: str, inference_profile_arn: str, logger: Logger, max_tokens: int = 130000) -> str | None:
     bedrock_runtime = boto3.client('bedrock-runtime', region_name='us-east-1')
     request_body = {
         "anthropic_version": "bedrock-2023-05-31",
@@ -47,9 +50,9 @@ def invoke_claude_3_sonnet(prompt: str, inference_profile_arn: str, logger: Logg
     }
     request_body_json = json.dumps(request_body)
     
-    max_retries = os.getenv("MAX_THROTTLING_RETRIES", 5)
+    max_retries = int(os.getenv("MAX_THROTTLING_RETRIES", 5))
     retry_count = 0
-    base_delay = os.getenv("BASE_THROTTLING_DELAY", 5)  # Base delay in seconds
+    base_delay = int(os.getenv("BASE_THROTTLING_DELAY", 5))  # Base delay in seconds
     
     while retry_count < max_retries:
         try:
@@ -81,10 +84,99 @@ def invoke_claude_3_sonnet(prompt: str, inference_profile_arn: str, logger: Logg
                 logger.error(e)
                 return str(e)
 
+def invoke_openai_gpt4o(prompt: str, logger: Logger, max_tokens: int = 4096) -> str | None:
+    openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    
+    request_body = {
+        "model": os.getenv("OPENAI_MODEL"),
+        "messages": [
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        "max_tokens": max_tokens
+    }
+    
+    max_retries = int(os.getenv("MAX_THROTTLING_RETRIES", 5))
+    retry_count = 0
+    base_delay = int(os.getenv("BASE_THROTTLING_DELAY", 5))  # Base delay in seconds
+    
+    while retry_count < max_retries:
+        try:
+            response = openai_client.chat.completions.create(**request_body)
+            
+            if response.choices and len(response.choices) > 0:
+                return response.choices[0].message.content
+            
+            return None
+        except Exception as e:
+            # OpenAI uses RateLimitError for throttling
+            if "RateLimitError" in str(e) or "rate_limit" in str(e).lower():
+                retry_count += 1
+                if retry_count >= max_retries:
+                    logger.error(f"Maximum retries exceeded: {e}")
+                    return str(e)
+                
+                # Calculate delay with exponential backoff and jitter
+                delay = base_delay * (2 ** (retry_count - 1)) + random.uniform(0, 1)
+                logger.warning(f"Rate limited. Retrying in {delay:.2f} seconds... (Attempt {retry_count}/{max_retries})")
+                time.sleep(delay)
+            else:
+                logger.error("Error invoking GPT-4o:")
+                logger.error(e)
+                return str(e)
+
+def invoke_claude_37_sonnet(prompt: str, logger: Logger, max_tokens: int = 4096) -> str | None:
+    # Initialize the Anthropic client
+    client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    
+    max_retries = int(os.getenv("MAX_THROTTLING_RETRIES", 5))
+    retry_count = 0
+    base_delay = int(os.getenv("BASE_THROTTLING_DELAY", 5))  # Base delay in seconds
+    
+    while retry_count < max_retries:
+        try:
+            # Create message using the Anthropic API
+            response = client.messages.create(
+                model="claude-3-7-sonnet-20250219",
+                max_tokens=max_tokens,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ]
+            )
+            
+            # Extract the response text
+            if response.content and len(response.content) > 0:
+                for content_block in response.content:
+                    if content_block.type == "text":
+                        return content_block.text
+            
+            return None
+        except Exception as e:
+            # Anthropic uses rate limit errors similar to this pattern
+            if "rate_limit" in str(e).lower() or "429" in str(e):
+                retry_count += 1
+                if retry_count >= max_retries:
+                    logger.error(f"Maximum retries exceeded: {e}")
+                    return str(e)
+                
+                # Calculate delay with exponential backoff and jitter
+                delay = base_delay * (2 ** (retry_count - 1)) + random.uniform(0, 1)
+                logger.warning(f"Rate limited. Retrying in {delay:.2f} seconds... (Attempt {retry_count}/{max_retries})")
+                time.sleep(delay)
+            else:
+                logger.error("Error invoking Claude:")
+                logger.error(e)
+                return str(e)
+
 def get_system_prompt(task: str, dom: str) -> str:
     prompt = f"""
 #info
-Review the provided dom and perform the following task. If the task is just a question then provide the relevant response. If possible, ask relevant question to the user to continue the chat.
+Review the provided DOM and perform the following task. If the task is just a question then provide the relevant response. If possible, ask relevant question to the user to continue the chat.
 
 #task
 {task}
@@ -92,23 +184,34 @@ Review the provided dom and perform the following task. If the task is just a qu
 #dom
 {dom}
 
-#Output Format
+#STRICT OUTPUT FORMAT - DO NOT BREAK THIS FORMAT
+Return ONLY a valid JSON object in the format below. DO NOT return any explanations, markdown, or text before or after the JSON. Your response MUST strictly match this structure:
+
 {{
     "data": {{
-        "response": "on the left side navigation menus, above the Kubernetes menu, hover on Administrator menu and click on Infrastructure submenu. ",
+        "response": "<Plain instruction in English, describing how to perform the task in a sentence or two. Be clear and brief.>",
         "actions": [
             {{
-                "selector": "html > body > app-root > vertical-layout > core-sidebar > app-menu > vertical-menu > div > div:nth-of-type(2) > ul > li > div > a",
-                "action": "click",
-                "waitBefore": 1000,
-                "waitAfter": 1000
-            }},
+                "selector": "<Full XPath starting with html > body ...>" it has to be the complete path without ...,
+                "fieldName": "<name of the field>",
+                "description": "<Describe what are you doing in this field>",
+                "action": "<click | hover | input | etc.>",
+                "waitBefore": <number in ms>,
+                "waitAfter": <number in ms>
+            }}
         ]
+    }}
 }}
 
-#Important things in the output format - 
-- DO NOT OUTPUT ANYTHING EXCEPT JSON RESULT
-- selector should be the xpath starting from the root tag STRICTLY in the format: html > body > app-root > vertical-layout > core-sidebar > app-menu > vertical-menu > div > div:nth-of-type(2) > ul > li:nth-of-type(1) > div > a
+#IMPORTANT RULES
+- Do NOT add any extra fields.
+- selector MUST follow this strict format: html > body > app-root > ...
+- waitBefore and waitAfter must be integers.
+- NEVER return Markdown, text, or code blocks—just raw JSON.
+- actions should ONLY be filled if I ask you to do anything on the dom
+
+#FAIL IF BROKEN
+Your output will be invalid unless it strictly follows this format. No wrapping in code blocks. No explanations. Just a JSON object.
 
 """
     return prompt
