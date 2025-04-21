@@ -107,7 +107,10 @@ def invoke_openai_gpt4o(prompt: str, logger: Logger, max_tokens: int = 4096) -> 
             response = openai_client.chat.completions.create(**request_body)
             
             if response.choices and len(response.choices) > 0:
-                return response.choices[0].message.content
+                content: str = response.choices[0].message.content
+                content = content.replace("```json", "")
+                content = content.replace("```", "")
+                return content
             
             return None
         except Exception as e:
@@ -176,7 +179,11 @@ def invoke_claude_37_sonnet(prompt: str, logger: Logger, max_tokens: int = 4096)
 def get_system_prompt(task: str, dom: str) -> str:
     prompt = f"""
 #info
-Review the provided DOM and perform the following task. If the task is just a question then provide the relevant response. If possible, ask relevant question to the user to continue the chat.
+Carefully analyze the provided DOM to perform the given task. Your job is to simulate how a user would interact with the web UI based on what is visible in the DOM.
+
+- If the task is a question, answer it based on the information available in the DOM.
+- If the task is DevOps-related (e.g., launching an EC2 instance, managing infrastructure, etc.) on the Duplo website, extract all necessary UI selectors and steps to complete the operation using the DOM.
+- If the DOM is missing required elements (like form fields, buttons, or modal dialogs), you MUST set "require_new_dom": true and clearly state what is missing.
 
 #task
 {task}
@@ -189,29 +196,39 @@ Return ONLY a valid JSON object in the format below. DO NOT return any explanati
 
 {{
     "data": {{
-        "response": "<Plain instruction in English, describing how to perform the task in a sentence or two. Be clear and brief.>",
+        "response": "<Plain English instruction on how to perform the task using available DOM.>",
         "actions": [
             {{
-                "selector": "<Full XPath starting with html > body ...>" it has to be the complete path without ...,
-                "fieldName": "<name of the field>",
-                "description": "<Describe what are you doing in this field>",
+                "selector": "<Full XPath starting with html > body ...>",
+                "fieldName": "<Name of the UI field or button>",
+                "description": "<What this step is doing>",
                 "action": "<click | hover | input | etc.>",
                 "waitBefore": <number in ms>,
                 "waitAfter": <number in ms>
             }}
-        ]
+        ],
+        "require_new_dom": <true | false>,
+        "new_dom_description": "<Explain what is missing and why the new DOM is needed. If require_new_dom=false, leave this empty string.>"
     }}
 }}
 
 #IMPORTANT RULES
-- Do NOT add any extra fields.
-- selector MUST follow this strict format: html > body > app-root > ...
-- waitBefore and waitAfter must be integers.
+- CRITICAL: You MUST include ALL required navigation steps, even when they involve multiple clicks through a navigation hierarchy.
+- For multi-level navigation (e.g., clicking a dropdown then a submenu item), include SEPARATE action items for EACH click in the sequence.
+- If a task requires clicking "Cloud Services" and then "Hosts", you MUST include both as separate action items.
+- When navigation involves expanding a section and then clicking a link within it, BOTH actions must be included.
+- Actions must be in the correct chronological order that a human would perform them.
+- You must validate whether the DOM contains ALL the required UI elements to complete the task.
+- If part of the workflow (e.g., a form to fill in EC2 instance details) is missing in the DOM, you MUST set require_new_dom to true and explain what's missing in new_dom_description.
+- Do NOT add any extra fields to the JSON.
+- selector MUST follow strict XPath starting with: html > body > app-root > ...
 - NEVER return Markdown, text, or code blocks—just raw JSON.
-- actions should ONLY be filled if I ask you to do anything on the dom
+- Only add steps in the "actions" array if the task involves interacting with the UI.
 
 #FAIL IF BROKEN
-Your output will be invalid unless it strictly follows this format. No wrapping in code blocks. No explanations. Just a JSON object.
+Your output will be invalid unless it strictly follows the above format. No wrapping in code blocks. No explanations. Just a JSON object.
 
+#COMPLETENESS CHECK 
+Before returning your final response, verify that your actions array includes ALL navigation steps needed. Check if any intermediate clicks (such as expanding a menu section before clicking a link within it) are missing. If the task involves multi-level navigation, confirm that EACH level has its own action item.
 """
     return prompt
