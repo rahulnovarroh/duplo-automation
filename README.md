@@ -65,7 +65,26 @@ flask --app index run --debug
 
 The server starts on `127.0.0.1:5000` and exposes a POST endpoint:
 
-```curl --location 'http://127.0.0.1:5000/agents' \
+### API with OpenAI
+
+```
+curl --location 'http://127.0.0.1:5000/openai-agents' \
+--form 'dom="<vertical-layout _ngcontent-hie-c55=\"\"...."' \
+--form 'task="No just provide default fields"
+```
+
+### API with Claude without Bedrock
+
+```
+curl --location 'http://127.0.0.1:5000/claude-agents' \
+--form 'dom="<vertical-layout _ngcontent-hie-c55=\"\"...."' \
+--form 'task="No just provide default fields"
+```
+
+### API with Claude via Bedrock
+
+```
+curl --location 'http://127.0.0.1:5000/bedrock-agents' \
 --form 'dom="<vertical-layout _ngcontent-hie-c55=\"\"...."' \
 --form 'task="No just provide default fields"
 ```
